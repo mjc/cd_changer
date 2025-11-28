@@ -180,7 +180,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
 
       html =
         view
-        |> element("button[phx-click='switch_view'][phx-value-mode='empty_slots']")
+        |> patch(~p"/load")
         |> render_click()
 
       assert html =~ "Search for an album or artist to load"
@@ -192,7 +192,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
       {:ok, view, _html} = live(conn, "/")
 
       view
-      |> element("button[phx-click='switch_view'][phx-value-mode='empty_slots']")
+      |> patch(~p"/load")
       |> render_click()
 
       html = render(view)
@@ -219,7 +219,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
 
       # Switch to empty slots view
       view
-      |> element("button[phx-click='switch_view'][phx-value-mode='empty_slots']")
+      |> patch(~p"/load")
       |> render_click()
 
       # Search for Beatles
@@ -237,7 +237,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
       {:ok, view, _html} = live(conn, "/")
 
       view
-      |> element("button[phx-click='switch_view'][phx-value-mode='empty_slots']")
+      |> patch(~p"/load")
       |> render_click()
 
       html =
@@ -255,7 +255,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
       {:ok, view, _html} = live(conn, "/")
 
       view
-      |> element("button[phx-click='switch_view'][phx-value-mode='empty_slots']")
+      |> patch(~p"/load")
       |> render_click()
 
       html =
@@ -270,7 +270,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
       {:ok, view, _html} = live(conn, "/")
 
       view
-      |> element("button[phx-click='switch_view'][phx-value-mode='empty_slots']")
+      |> patch(~p"/load")
       |> render_click()
 
       # Search for Led Zeppelin
@@ -298,7 +298,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
       {:ok, view, _html} = live(conn, "/")
 
       view
-      |> element("button[phx-click='switch_view'][phx-value-mode='empty_slots']")
+      |> patch(~p"/load")
       |> render_click()
 
       view
@@ -331,7 +331,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
 
       html =
         view
-        |> element("button[phx-click='switch_view'][phx-value-mode='empty_slots']")
+        |> patch(~p"/load")
         |> render_click()
 
       assert html =~ "All slots are loaded!"
@@ -348,7 +348,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
       # Switch to empty slots
       html =
         view
-        |> element("button[phx-click='switch_view'][phx-value-mode='empty_slots']")
+        |> patch(~p"/load")
         |> render_click()
 
       assert html =~ "Search for an album or artist to load"
@@ -357,7 +357,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
       # Switch back to albums
       html =
         view
-        |> element("button[phx-click='switch_view'][phx-value-mode='albums']")
+        |> patch(~p"/ ")
         |> render_click()
 
       assert html =~ "Abbey Road"
@@ -374,7 +374,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
       # Switch to empty slots
       html =
         view
-        |> element("button[phx-click='switch_view'][phx-value-mode='empty_slots']")
+        |> patch(~p"/load")
         |> render_click()
 
       # Load Album button should be active and empty slots view should be shown
@@ -428,7 +428,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
 
       html =
         view
-        |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
+        |> patch(~p"/add")
         |> render_click()
 
       assert html =~ "Add New CD to Catalog"
@@ -443,7 +443,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
 
       # Switch to new CD view
       view
-      |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
+      |> patch(~p"/add")
       |> render_click()
 
       # Type into search field to trigger debounced search
@@ -489,7 +489,7 @@ defmodule CdRobotWeb.ChangerLiveTest do
 
       # Switch to new CD view and type in search
       view
-      |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
+      |> patch(~p"/add")
       |> render_click()
 
       view
@@ -498,13 +498,13 @@ defmodule CdRobotWeb.ChangerLiveTest do
 
       # Switch to albums view
       view
-      |> element("button[phx-click='switch_view'][phx-value-mode='albums']")
+      |> patch(~p"/ ")
       |> render_click()
 
       # Switch back to new CD view
       html =
         view
-        |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
+        |> patch(~p"/add")
         |> render_click()
 
       # Search should be cleared

@@ -24,6 +24,13 @@ config :cd_robot, CdRobotWeb.Endpoint,
   watchers: [
     esbuild: {Esbuild, :install_and_run, [:cd_robot, ~w(--sourcemap=inline --watch)]},
     tailwind: {Tailwind, :install_and_run, [:cd_robot, ~w(--watch)]}
+  ],
+  live_reload: [
+    patterns: [
+      ~r"priv/static/(?!uploads/).*(js|css|png|jpeg|jpg|gif|svg)$",
+      ~r"priv/gettext/.*(po)$",
+      ~r"lib/cd_robot_web/(controllers|live|components)/.*(ex|heex)$"
+    ]
   ]
 
 # ## SSL Support

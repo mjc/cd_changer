@@ -9,7 +9,6 @@ defmodule CdRobotWeb.ChangerLive do
     {:ok,
      socket
      |> assign(:slots, slots)
-     |> assign(:view_mode, :albums)
      |> assign(:selected_disk, nil)
      |> assign(:search_query, "")
      |> assign(:search_results, [])
@@ -21,14 +20,11 @@ defmodule CdRobotWeb.ChangerLive do
   end
 
   @impl true
-  def handle_event("switch_view", %{"mode" => mode}, socket) do
-    {:noreply,
-     socket
-     |> assign(:view_mode, String.to_existing_atom(mode))
-     |> assign(:musicbrainz_query, "")
-     |> assign(:musicbrainz_results, [])}
+  def handle_params(_params, _url, socket) do
+    {:noreply, socket}
   end
 
+  @impl true
   def handle_event("select_disk", %{"disk_id" => disk_id}, socket) do
     slot = Enum.find(socket.assigns.slots, &(&1.disk_id == disk_id))
 
@@ -142,19 +138,28 @@ defmodule CdRobotWeb.ChangerLive do
 
   @impl true
   def handle_info({:do_musicbrainz_search, query}, socket) do
+    require Logger
+    Logger.debug("Triggering MusicBrainz search for: #{inspect(query)}")
+
     # Only search if the query hasn't changed
     if query == socket.assigns.musicbrainz_query do
       # Parse query - assume "artist - album" format, or just artist
       {artist, album} = parse_search_query(query)
 
+      Logger.debug("Parsed artist: #{artist}, album: #{album}")
+
       MusicBrainz.lookup_album(self(), artist, album)
       {:noreply, assign(socket, :gnudb_loading, true)}
     else
+      Logger.debug("Query changed, skipping search")
       {:noreply, socket}
     end
   end
 
   def handle_info({:musicbrainz_result, result, _artist, _album}, socket) do
+    require Logger
+    Logger.debug("Received MusicBrainz result: #{inspect(result)}")
+
     socket =
       case result do
         {:ok, [_ | _] = results} ->
@@ -201,7 +206,6 @@ defmodule CdRobotWeb.ChangerLive do
         slots = Changer.list_slots()
 
         socket
-        |> assign(:view_mode, :albums)
         |> assign(:slots, slots)
         |> assign(:musicbrainz_results, [])
         |> assign(:musicbrainz_query, "")
@@ -209,8 +213,9 @@ defmodule CdRobotWeb.ChangerLive do
         |> assign(:search_results, [])
         |> put_flash(
           :info,
-          "Album '#{disk_attrs.title}' by #{disk_attrs.artist} added with #{length(tracks_attrs)} tracks from MusicBrainz"
+          "Album '#{disk_attrs.title}' by #{disk_attrs.artist} added. Select a slot to load it."
         )
+        |> push_patch(to: ~p"/load")
 
       {:error, changeset} ->
         error_message =
@@ -246,7 +251,6 @@ defmodule CdRobotWeb.ChangerLive do
         slots = Changer.list_slots()
 
         socket
-        |> assign(:view_mode, :albums)
         |> assign(:slots, slots)
         |> assign(:musicbrainz_results, [])
         |> assign(:musicbrainz_query, "")
@@ -254,8 +258,9 @@ defmodule CdRobotWeb.ChangerLive do
         |> assign(:search_results, [])
         |> put_flash(
           :info,
-          "Album '#{album}' by #{artist} added to catalog (MusicBrainz lookup unsuccessful, basic entry created)"
+          "Album '#{album}' by #{artist} added. Select a slot to load it."
         )
+        |> push_patch(to: ~p"/load")
 
       {:error, changeset} ->
         error_message =
@@ -301,12 +306,11 @@ defmodule CdRobotWeb.ChangerLive do
 
           <%!-- View Mode Toggle --%>
           <div class="grid grid-cols-3 gap-2">
-            <button
-              phx-click="switch_view"
-              phx-value-mode="albums"
+            <.link
+              patch={~p"/"}
               class={[
-                "px-4 py-3 rounded-lg font-semibold transition-all",
-                if(@view_mode == :albums,
+                "px-4 py-3 rounded-lg font-semibold transition-all text-center",
+                if(@live_action == :albums,
                   do: "bg-blue-600 text-white shadow-lg shadow-blue-500/50",
                   else: "bg-slate-700 text-slate-300 hover:bg-slate-600"
                 )
@@ -314,13 +318,12 @@ defmodule CdRobotWeb.ChangerLive do
             >
               <.icon name="hero-musical-note" class="w-5 h-5 inline mr-2" />
               Albums
-            </button>
-            <button
-              phx-click="switch_view"
-              phx-value-mode="empty_slots"
+            </.link>
+            <.link
+              patch={~p"/load"}
               class={[
-                "px-4 py-3 rounded-lg font-semibold transition-all",
-                if(@view_mode == :empty_slots,
+                "px-4 py-3 rounded-lg font-semibold transition-all text-center",
+                if(@live_action == :load,
                   do: "bg-blue-600 text-white shadow-lg shadow-blue-500/50",
                   else: "bg-slate-700 text-slate-300 hover:bg-slate-600"
                 )
@@ -328,13 +331,12 @@ defmodule CdRobotWeb.ChangerLive do
             >
               <.icon name="hero-plus-circle" class="w-5 h-5 inline mr-2" />
               Load Album
-            </button>
-            <button
-              phx-click="switch_view"
-              phx-value-mode="new_cd"
+            </.link>
+            <.link
+              patch={~p"/add"}
               class={[
-                "px-4 py-3 rounded-lg font-semibold transition-all",
-                if(@view_mode == :new_cd,
+                "px-4 py-3 rounded-lg font-semibold transition-all text-center",
+                if(@live_action == :add,
                   do: "bg-blue-600 text-white shadow-lg shadow-blue-500/50",
                   else: "bg-slate-700 text-slate-300 hover:bg-slate-600"
                 )
@@ -342,12 +344,12 @@ defmodule CdRobotWeb.ChangerLive do
             >
               <.icon name="hero-plus" class="w-5 h-5 inline mr-2" />
               Add New CD
-            </button>
+            </.link>
           </div>
         </div>
 
         <%= cond do %>
-          <% @view_mode == :albums -> %>
+          <% @live_action == :albums -> %>
           <%!-- Albums View --%>
           <div class="bg-slate-800/90 backdrop-blur rounded-2xl shadow-2xl p-6 border border-slate-700">
             <%= if Enum.any?(@slots, & &1.disk_id) do %>
@@ -398,7 +400,7 @@ defmodule CdRobotWeb.ChangerLive do
             <% end %>
           </div>
 
-          <% @view_mode == :empty_slots -> %>
+          <% @live_action == :load -> %>
           <%!-- Empty Slots View --%>
           <div class="bg-slate-800/90 backdrop-blur rounded-2xl shadow-2xl p-6 border border-slate-700">
             <%!-- Search Bar --%>
@@ -510,7 +512,7 @@ defmodule CdRobotWeb.ChangerLive do
             </div>
           </div>
 
-          <% @view_mode == :new_cd -> %>
+          <% @live_action == :add -> %>
           <%!-- New CD View --%>
           <div class="bg-slate-800/90 backdrop-blur rounded-2xl shadow-2xl p-6 border border-slate-700">
             <div class="max-w-2xl mx-auto">
@@ -529,43 +531,44 @@ defmodule CdRobotWeb.ChangerLive do
                   <label class="block text-sm font-semibold text-slate-300 mb-2">
                     Search for Album
                   </label>
-                  <div class="relative">
-                    <input
-                      type="text"
-                      phx-change="search_musicbrainz"
-                      name="query"
-                      value={@musicbrainz_query}
-                      placeholder="Search by artist or 'Artist - Album'..."
-                      class="w-full px-4 py-3 pr-12 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      autofocus
-                    />
-                    <%= if @gnudb_loading do %>
-                      <div class="absolute right-4 top-1/2 -translate-y-1/2">
-                        <svg
-                          class="w-5 h-5 animate-spin text-blue-400"
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            class="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            stroke-width="4"
+                  <form phx-change="search_musicbrainz">
+                    <div class="relative">
+                      <input
+                        type="text"
+                        name="query"
+                        value={@musicbrainz_query}
+                        placeholder="Search by artist or 'Artist - Album'..."
+                        class="w-full px-4 py-3 pr-12 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        autofocus
+                      />
+                      <%= if @gnudb_loading do %>
+                        <div class="absolute right-4 top-1/2 -translate-y-1/2">
+                          <svg
+                            class="w-5 h-5 animate-spin text-blue-400"
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
                           >
-                          </circle>
-                          <path
-                            class="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          >
-                          </path>
-                        </svg>
-                      </div>
-                    <% end %>
-                  </div>
+                            <circle
+                              class="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              stroke-width="4"
+                            >
+                            </circle>
+                            <path
+                              class="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            >
+                            </path>
+                          </svg>
+                        </div>
+                      <% end %>
+                    </div>
+                  </form>
                   <p class="mt-2 text-xs text-slate-500">
                     Type artist name for all albums, or "Artist - Album" for specific album
                   </p>
