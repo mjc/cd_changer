@@ -17,9 +17,9 @@ defmodule CdRobotWeb.Router do
   scope "/", CdRobotWeb do
     pipe_through :browser
 
-    live "/", ChangerLive, :albums
-    live "/load", ChangerLive, :load
-    live "/add", ChangerLive, :add
+    live "/", AlbumsLive, :albums
+    live "/load", LoadLive, :load
+    live "/add", AddLive, :add
   end
 
   scope "/api", CdRobotWeb do
