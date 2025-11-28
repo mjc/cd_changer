@@ -54,10 +54,41 @@ defmodule CdRobot.Catalog do
   """
   def create_disk_with_tracks(disk_attrs, tracks_attrs) when is_list(tracks_attrs) do
     Repo.transaction(fn ->
-      with {:ok, disk} <- create_disk(disk_attrs),
-           {:ok, _tracks} <- insert_tracks(disk, tracks_attrs) do
-        disk |> Repo.preload(:tracks)
-      else
+      # Check if disk already exists by disc_id
+      existing_disk =
+        case disk_attrs do
+          %{disc_id: disc_id} when not is_nil(disc_id) ->
+            Repo.get_by(Disk, disc_id: disc_id)
+
+          _ ->
+            nil
+        end
+
+      disk =
+        case existing_disk do
+          nil ->
+            # Create new disk
+            case create_disk(disk_attrs) do
+              {:ok, disk} -> disk
+              {:error, changeset} -> Repo.rollback(changeset)
+            end
+
+          existing ->
+            # Update existing disk
+            case update_disk(existing, disk_attrs) do
+              {:ok, disk} -> disk
+              {:error, changeset} -> Repo.rollback(changeset)
+            end
+        end
+
+      # Delete old tracks if updating
+      if existing_disk do
+        Repo.delete_all(from t in Track, where: t.disk_id == ^disk.id)
+      end
+
+      # Insert new tracks
+      case insert_tracks(disk, tracks_attrs) do
+        {:ok, _tracks} -> disk |> Repo.preload(:tracks)
         {:error, changeset} -> Repo.rollback(changeset)
       end
     end)

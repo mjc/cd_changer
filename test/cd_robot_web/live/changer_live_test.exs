@@ -433,10 +433,11 @@ defmodule CdRobotWeb.ChangerLiveTest do
 
       assert html =~ "Add New CD to Catalog"
       assert html =~ "Enter the artist and album name"
-      assert html =~ "Look Up on GNUDB"
+      assert html =~ "Look Up on MusicBrainz"
       assert html =~ "No CD drive detected"
     end
 
+    @tag :external_api
     test "can add new CD manually", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/")
 
@@ -445,23 +446,40 @@ defmodule CdRobotWeb.ChangerLiveTest do
       |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
       |> render_click()
 
-      # Fill in the form
+      # Fill in and submit the form
       view
       |> element("form")
-      |> render_change(%{new_cd: %{artist: "Radiohead", album: "OK Computer"}})
+      |> render_submit(%{new_cd: %{artist: "Radiohead", album: "OK Computer"}})
 
-      # Submit the form
-      html =
-        view
-        |> element("form")
-        |> render_submit(%{new_cd: %{artist: "Radiohead", album: "OK Computer"}})
+      # Wait for async GNUDB lookup to complete and process
+      # The GenServer will send a message to the LiveView, which will then create the disk
+      # We poll the database until the disk appears
+      assert eventually(fn ->
+               disks = Catalog.list_disks()
+               Enum.any?(disks, fn d -> d.title == "OK Computer" && d.artist == "Radiohead" end)
+             end)
+    end
 
-      # Form should be cleared after successful submission
-      assert html =~ "value=\"\""
+    # Helper to poll a condition until it becomes true
+    defp eventually(fun, timeout \\ 5000, interval \\ 100) do
+      end_time = System.monotonic_time(:millisecond) + timeout
 
-      # Verify it was created in the database
-      disks = Catalog.list_disks()
-      assert Enum.any?(disks, fn d -> d.title == "OK Computer" && d.artist == "Radiohead" end)
+      do_eventually(fun, end_time, interval)
+    end
+
+    defp do_eventually(fun, end_time, interval) do
+      if fun.() do
+        true
+      else
+        now = System.monotonic_time(:millisecond)
+
+        if now >= end_time do
+          false
+        else
+          Process.sleep(interval)
+          do_eventually(fun, end_time, interval)
+        end
+      end
     end
 
     test "shows error when submitting empty form", %{conn: conn} do

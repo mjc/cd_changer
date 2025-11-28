@@ -14,6 +14,8 @@ defmodule CdRobot.Application do
        repos: Application.fetch_env!(:cd_robot, :ecto_repos), skip: skip_migrations?()},
       {DNSCluster, query: Application.get_env(:cd_robot, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: CdRobot.PubSub},
+      # Start MusicBrainz client GenServer for rate-limited API requests
+      CdRobot.MusicBrainzClient,
       # Start a worker by calling: CdRobot.Worker.start_link(arg)
       # {CdRobot.Worker, arg},
       # Start to serve requests, typically the last entry

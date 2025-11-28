@@ -1,6 +1,8 @@
 defmodule CdRobotWeb.ChangerLive do
   use CdRobotWeb, :live_view
   alias CdRobot.{Changer, Catalog}
+  alias CdRobot.MusicBrainzClient
+  alias CdRobot.MusicBrainz
 
   @impl true
   def mount(_params, _session, socket) do
@@ -13,7 +15,11 @@ defmodule CdRobotWeb.ChangerLive do
      |> assign(:selected_disk, nil)
      |> assign(:search_query, "")
      |> assign(:search_results, [])
+     |> assign(:musicbrainz_results, [])
+     |> assign(:search_artist, nil)
+     |> assign(:search_album, nil)
      |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))
+     |> assign(:gnudb_loading, false)
      |> assign(:page_title, "CD Changer")}
   end
 
@@ -88,41 +94,165 @@ defmodule CdRobotWeb.ChangerLive do
      |> assign(:selected_disk, nil)
      |> assign(:search_query, "")
      |> assign(:search_results, [])
+     |> assign(:musicbrainz_results, [])
      |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))}
+  end
+
+  def handle_event("select_musicbrainz_result", %{"disc_id" => disc_id}, socket) do
+    result = Enum.find(socket.assigns.musicbrainz_results, &(&1.disc_id == disc_id))
+
+    socket =
+      if result do
+        case MusicBrainz.get_disc_info(result.category, result.disc_id) do
+          {:ok, disc_info} ->
+            create_disk_from_musicbrainz(socket, disc_info, result.disc_id)
+
+          {:error, _} ->
+            create_basic_disk(socket, socket.assigns.search_artist, socket.assigns.search_album)
+        end
+      else
+        socket
+        |> put_flash(:error, "Invalid selection")
+      end
+
+    {:noreply, assign(socket, :gnudb_loading, false)}
   end
 
   def handle_event("validate_new_cd", %{"new_cd" => params}, socket) do
     {:noreply, assign(socket, :new_cd_form, to_form(params))}
   end
 
-  def handle_event("lookup_gnudb", %{"new_cd" => %{"artist" => artist, "album" => album}}, socket) do
-    if String.trim(artist) == "" or String.trim(album) == "" do
+  def handle_event("lookup_gnudb", %{"new_cd" => params}, socket) do
+    artist = String.trim(Map.get(params, "artist", ""))
+    album = String.trim(Map.get(params, "album", ""))
+
+    if artist == "" do
       {:noreply,
        socket
-       |> put_flash(:error, "Please enter both artist and album name")}
+       |> put_flash(:error, "Please enter an artist name")}
     else
-      # TODO: Implement GNUDB API lookup
-      # For now, create a placeholder disk that can be edited later
-      disc_id = :crypto.hash(:md5, "#{artist}#{album}") |> Base.encode16(case: :lower) |> String.slice(0..7)
+      # Asynchronously look up the album on MusicBrainz via GenServer
+      MusicBrainzClient.lookup_album(self(), artist, album)
 
-      case Catalog.create_disk(%{
-             title: String.trim(album),
-             artist: String.trim(artist),
-             disc_id: disc_id
-           }) do
-        {:ok, _disk} ->
-          {:noreply,
-           socket
-           |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))
-           |> assign(:search_query, "")
-           |> assign(:search_results, [])
-           |> put_flash(:info, "Album '#{album}' by #{artist} added to catalog")}
+      {:noreply, assign(socket, :gnudb_loading, true)}
+    end
+  end
 
-        {:error, changeset} ->
-          {:noreply,
-           socket
-           |> put_flash(:error, "Failed to add album: #{inspect(changeset.errors)}")}
+  @impl true
+  def handle_info({:musicbrainz_result, result, artist, album}, socket) do
+    socket =
+      case result do
+        {:ok, [_ | _] = results} ->
+          # Show results to user for selection
+          socket
+          |> assign(:musicbrainz_results, results)
+          |> assign(:search_artist, artist)
+          |> assign(:search_album, album)
+          |> put_flash(:info, "Found #{length(results)} matches. Select the correct album below.")
+
+        {:error, :not_found} ->
+          create_basic_disk(socket, artist, album)
+
+        {:error, _} ->
+          create_basic_disk(socket, artist, album)
       end
+
+    {:noreply, assign(socket, :gnudb_loading, false)}
+  end
+
+  defp create_disk_from_musicbrainz(socket, disc_info, disc_id) do
+    disk_attrs = %{
+      title: disc_info[:album] || disc_info[:title],
+      artist: disc_info[:artist],
+      disc_id: disc_id,
+      year: disc_info[:year],
+      genre: disc_info[:genre],
+      total_tracks: length(disc_info[:tracks] || []),
+      cover_art_url: disc_info[:cover_art_url]
+    }
+
+    tracks_attrs = disc_info[:tracks] || []
+
+    case Catalog.create_disk_with_tracks(disk_attrs, tracks_attrs) do
+      {:ok, _disk} ->
+        slots = Changer.list_slots()
+
+        socket
+        |> assign(:view_mode, :albums)
+        |> assign(:slots, slots)
+        |> assign(:musicbrainz_results, [])
+        |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))
+        |> assign(:search_query, "")
+        |> assign(:search_results, [])
+        |> put_flash(
+          :info,
+          "Album '#{disk_attrs.title}' by #{disk_attrs.artist} added with #{length(tracks_attrs)} tracks from MusicBrainz"
+        )
+
+      {:error, changeset} ->
+        error_message =
+          cond do
+            changeset.errors[:disc_id] ->
+              "This album is already in your catalog"
+
+            changeset.errors[:title] ->
+              "Album title is required"
+
+            changeset.errors[:artist] ->
+              "Artist name is required"
+
+            true ->
+              "Failed to add album. Please try again."
+          end
+
+        socket
+        |> assign(:musicbrainz_results, [])
+        |> put_flash(:error, error_message)
+    end
+  end
+
+  defp create_basic_disk(socket, artist, album) do
+    disc_id = MusicBrainz.generate_disc_id(artist, album)
+
+    case Catalog.create_disk(%{
+           title: album,
+           artist: artist,
+           disc_id: disc_id
+         }) do
+      {:ok, _disk} ->
+        slots = Changer.list_slots()
+
+        socket
+        |> assign(:view_mode, :albums)
+        |> assign(:slots, slots)
+        |> assign(:musicbrainz_results, [])
+        |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))
+        |> assign(:search_query, "")
+        |> assign(:search_results, [])
+        |> put_flash(
+          :info,
+          "Album '#{album}' by #{artist} added to catalog (MusicBrainz lookup unsuccessful, basic entry created)"
+        )
+
+      {:error, changeset} ->
+        error_message =
+          cond do
+            changeset.errors[:disc_id] ->
+              "This album is already in your catalog"
+
+            changeset.errors[:title] ->
+              "Album title is required"
+
+            changeset.errors[:artist] ->
+              "Artist name is required"
+
+            true ->
+              "Failed to add album. Please try again."
+          end
+
+        socket
+        |> assign(:musicbrainz_results, [])
+        |> put_flash(:error, error_message)
     end
   end
 
@@ -367,7 +497,7 @@ defmodule CdRobotWeb.ChangerLive do
                 </div>
                 <h2 class="text-2xl font-bold text-white mb-2">Add New CD to Catalog</h2>
                 <p class="text-slate-400">
-                  Enter the artist and album name to look up metadata from GNUDB
+                  Enter the artist and album name to look up metadata from MusicBrainz
                 </p>
               </div>
 
@@ -386,6 +516,7 @@ defmodule CdRobotWeb.ChangerLive do
                     name="new_cd[artist]"
                     value={@new_cd_form.params["artist"] || ""}
                     placeholder="e.g., The Beatles"
+                    required
                     class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     autofocus
                   />
@@ -393,7 +524,7 @@ defmodule CdRobotWeb.ChangerLive do
 
                 <div>
                   <label class="block text-sm font-semibold text-slate-300 mb-2">
-                    Album Title
+                    Album Title <span class="text-slate-500 font-normal">(optional - leave blank for all albums)</span>
                   </label>
                   <input
                     type="text"
@@ -407,13 +538,63 @@ defmodule CdRobotWeb.ChangerLive do
                 <div class="flex gap-3">
                   <button
                     type="submit"
+                    disabled={@gnudb_loading}
                     class="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold transition-colors shadow-lg hover:shadow-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <.icon name="hero-magnifying-glass" class="w-5 h-5 inline mr-2" />
-                    Look Up on GNUDB
+                    <%= if @gnudb_loading do %>
+                      <svg
+                        class="inline w-5 h-5 mr-2 animate-spin"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          class="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          stroke-width="4"
+                        >
+                        </circle>
+                        <path
+                          class="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        >
+                        </path>
+                      </svg>
+                      Looking up on MusicBrainz...
+                    <% else %>
+                      <.icon name="hero-magnifying-glass" class="w-5 h-5 inline mr-2" />
+                      Look Up on MusicBrainz
+                    <% end %>
                   </button>
                 </div>
               </.form>
+
+              <%= if Enum.any?(@musicbrainz_results) do %>
+                <div class="mt-6">
+                  <h3 class="text-lg font-semibold text-white mb-4">
+                    Select the correct album:
+                  </h3>
+                  <div class="space-y-3">
+                    <%= for result <- @musicbrainz_results do %>
+                      <button
+                        phx-click="select_musicbrainz_result"
+                        phx-value-disc_id={result.disc_id}
+                        class="w-full p-4 bg-slate-900/50 hover:bg-slate-700/50 border border-slate-600 hover:border-blue-500 rounded-lg text-left transition-all"
+                      >
+                        <div class="font-semibold text-white"><%= result.album %></div>
+                        <div class="text-sm text-slate-400">by <%= result.artist %></div>
+                        <%= if result.year do %>
+                          <div class="text-xs text-slate-500 mt-1">Released: <%= result.year %></div>
+                        <% end %>
+                      </button>
+                    <% end %>
+                  </div>
+                </div>
+              <% end %>
 
               <div class="mt-8 p-4 bg-slate-900/50 rounded-lg border border-slate-700">
                 <div class="flex gap-3">
@@ -424,12 +605,21 @@ defmodule CdRobotWeb.ChangerLive do
                       You can manually add CDs by entering the artist and album information.
                     </p>
                     <p>
-                      The system will attempt to look up track listings and metadata from the GNUDB database.
+                      The system will attempt to look up track listings and metadata from the MusicBrainz database.
                       If not found, a basic entry will be created that you can edit later.
                     </p>
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <% true -> %>
+          <%!-- Default/Changer View --%>
+          <div class="bg-slate-800/90 backdrop-blur rounded-2xl shadow-2xl p-6 border border-slate-700">
+            <div class="text-center py-12 text-slate-400">
+              <.icon name="hero-musical-note" class="w-16 h-16 mx-auto mb-4 opacity-50" />
+              <p class="text-lg">Select a view mode above</p>
             </div>
           </div>
         <% end %>
