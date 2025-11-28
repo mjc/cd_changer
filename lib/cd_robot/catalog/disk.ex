@@ -23,7 +23,16 @@ defmodule CdRobot.Catalog.Disk do
   @doc false
   def changeset(disk, attrs) do
     disk
-    |> cast(attrs, [:title, :artist, :genre, :year, :disc_id, :total_tracks, :duration_seconds, :cover_art_url])
+    |> cast(attrs, [
+      :title,
+      :artist,
+      :genre,
+      :year,
+      :disc_id,
+      :total_tracks,
+      :duration_seconds,
+      :cover_art_url
+    ])
     |> validate_required([:disc_id])
     |> unique_constraint(:disc_id)
   end

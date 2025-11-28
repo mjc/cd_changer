@@ -78,6 +78,7 @@
               pkgs.docker-compose
               pkgs.gnupg
               pkgs.pinentry-curses
+              pkgs.watchman
               # Video processing tools for CI/dev
               pkgs.ab-av1
               pkgs.mediainfo
