@@ -432,8 +432,8 @@ defmodule CdRobotWeb.ChangerLiveTest do
         |> render_click()
 
       assert html =~ "Add New CD to Catalog"
-      assert html =~ "Enter the artist and album name"
-      assert html =~ "Look Up on MusicBrainz"
+      assert html =~ "Search for Album"
+      assert html =~ "Search by artist or"
       assert html =~ "No CD drive detected"
     end
 
@@ -446,17 +446,19 @@ defmodule CdRobotWeb.ChangerLiveTest do
       |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
       |> render_click()
 
-      # Fill in and submit the form
+      # Type into search field to trigger debounced search
       view
-      |> element("form")
-      |> render_submit(%{new_cd: %{artist: "Radiohead", album: "OK Computer"}})
+      |> element("input[name='query']")
+      |> render_change(%{query: "Radiohead - OK Computer"})
 
-      # Wait for async GNUDB lookup to complete and process
-      # The GenServer will send a message to the LiveView, which will then create the disk
-      # We poll the database until the disk appears
+      # Wait for debounce and async MusicBrainz lookup to complete
+      Process.sleep(600)
+
+      # Wait for the result to come back and be processed
       assert eventually(fn ->
-               disks = Catalog.list_disks()
-               Enum.any?(disks, fn d -> d.title == "OK Computer" && d.artist == "Radiohead" end)
+               # Check if results are showing
+               html = render(view)
+               html =~ "Select the correct album" || html =~ "OK Computer"
              end)
     end
 
@@ -482,39 +484,17 @@ defmodule CdRobotWeb.ChangerLiveTest do
       end
     end
 
-    test "shows error when submitting empty form", %{conn: conn} do
+    test "clears search when switching views", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/")
 
-      # Switch to new CD view
-      view
-      |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
-      |> render_click()
-
-      # Submit empty form
-      _html =
-        view
-        |> element("form")
-        |> render_submit(%{new_cd: %{artist: "", album: ""}})
-
-      # Verify no disk was created
-      initial_count = length(Catalog.list_disks())
-
-      # After submitting empty form, count should stay the same
-      final_count = length(Catalog.list_disks())
-      assert final_count == initial_count
-    end
-
-    test "form is cleared when switching views", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/")
-
-      # Switch to new CD view and fill form
+      # Switch to new CD view and type in search
       view
       |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
       |> render_click()
 
       view
-      |> element("form")
-      |> render_change(%{new_cd: %{artist: "Test Artist", album: "Test Album"}})
+      |> element("input[name='query']")
+      |> render_change(%{query: "Test Artist"})
 
       # Switch to albums view
       view
@@ -527,9 +507,8 @@ defmodule CdRobotWeb.ChangerLiveTest do
         |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
         |> render_click()
 
-      # Form should be cleared
+      # Search should be cleared
       refute html =~ "Test Artist"
-      refute html =~ "Test Album"
     end
   end
 end

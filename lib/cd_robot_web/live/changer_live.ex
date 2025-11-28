@@ -14,10 +14,9 @@ defmodule CdRobotWeb.ChangerLive do
      |> assign(:search_query, "")
      |> assign(:search_results, [])
      |> assign(:musicbrainz_results, [])
-     |> assign(:search_artist, nil)
-     |> assign(:search_album, nil)
-     |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))
+     |> assign(:musicbrainz_query, "")
      |> assign(:gnudb_loading, false)
+     |> assign(:debounce_timer, nil)
      |> assign(:page_title, "CD Changer")}
   end
 
@@ -26,7 +25,8 @@ defmodule CdRobotWeb.ChangerLive do
     {:noreply,
      socket
      |> assign(:view_mode, String.to_existing_atom(mode))
-     |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))}
+     |> assign(:musicbrainz_query, "")
+     |> assign(:musicbrainz_results, [])}
   end
 
   def handle_event("select_disk", %{"disk_id" => disk_id}, socket) do
@@ -93,7 +93,7 @@ defmodule CdRobotWeb.ChangerLive do
      |> assign(:search_query, "")
      |> assign(:search_results, [])
      |> assign(:musicbrainz_results, [])
-     |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))}
+     |> assign(:musicbrainz_query, "")}
   end
 
   def handle_event("select_musicbrainz_result", %{"disc_id" => disc_id}, socket) do
@@ -106,56 +106,81 @@ defmodule CdRobotWeb.ChangerLive do
             create_disk_from_musicbrainz(socket, disc_info, result.disc_id)
 
           {:error, _} ->
-            create_basic_disk(socket, socket.assigns.search_artist, socket.assigns.search_album)
+            # Fallback to basic disk using result data
+            create_basic_disk(socket, result.artist, result.album)
         end
       else
         socket
         |> put_flash(:error, "Invalid selection")
       end
 
-    {:noreply, assign(socket, :gnudb_loading, false)}
+    {:noreply, socket}
   end
 
-  def handle_event("validate_new_cd", %{"new_cd" => params}, socket) do
-    {:noreply, assign(socket, :new_cd_form, to_form(params))}
-  end
+  def handle_event("search_musicbrainz", %{"query" => query}, socket) do
+    query = String.trim(query)
 
-  def handle_event("lookup_gnudb", %{"new_cd" => params}, socket) do
-    artist = String.trim(Map.get(params, "artist", ""))
-    album = String.trim(Map.get(params, "album", ""))
+    # Cancel existing timer if any
+    if socket.assigns.debounce_timer do
+      Process.cancel_timer(socket.assigns.debounce_timer)
+    end
 
-    if artist == "" do
+    socket = assign(socket, :musicbrainz_query, query)
+
+    if query == "" do
       {:noreply,
        socket
-       |> put_flash(:error, "Please enter an artist name")}
+       |> assign(:musicbrainz_results, [])
+       |> assign(:gnudb_loading, false)
+       |> assign(:debounce_timer, nil)}
     else
-      # Asynchronously look up the album on MusicBrainz via GenServer
-      MusicBrainz.lookup_album(self(), artist, album)
-
-      {:noreply, assign(socket, :gnudb_loading, true)}
+      # Set a timer to trigger search after 500ms of no typing
+      timer = Process.send_after(self(), {:do_musicbrainz_search, query}, 500)
+      {:noreply, assign(socket, :debounce_timer, timer)}
     end
   end
 
   @impl true
-  def handle_info({:musicbrainz_result, result, artist, album}, socket) do
+  def handle_info({:do_musicbrainz_search, query}, socket) do
+    # Only search if the query hasn't changed
+    if query == socket.assigns.musicbrainz_query do
+      # Parse query - assume "artist - album" format, or just artist
+      {artist, album} = parse_search_query(query)
+
+      MusicBrainz.lookup_album(self(), artist, album)
+      {:noreply, assign(socket, :gnudb_loading, true)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:musicbrainz_result, result, _artist, _album}, socket) do
     socket =
       case result do
         {:ok, [_ | _] = results} ->
-          # Show results to user for selection
           socket
           |> assign(:musicbrainz_results, results)
-          |> assign(:search_artist, artist)
-          |> assign(:search_album, album)
-          |> put_flash(:info, "Found #{length(results)} matches. Select the correct album below.")
+          |> assign(:gnudb_loading, false)
 
         {:error, :not_found} ->
-          create_basic_disk(socket, artist, album)
+          socket
+          |> assign(:musicbrainz_results, [])
+          |> assign(:gnudb_loading, false)
 
         {:error, _} ->
-          create_basic_disk(socket, artist, album)
+          socket
+          |> assign(:musicbrainz_results, [])
+          |> assign(:gnudb_loading, false)
       end
 
-    {:noreply, assign(socket, :gnudb_loading, false)}
+    {:noreply, socket}
+  end
+
+  defp parse_search_query(query) do
+    case String.split(query, " - ", parts: 2) do
+      [artist, album] -> {String.trim(artist), String.trim(album)}
+      [artist] -> {String.trim(artist), ""}
+    end
   end
 
   defp create_disk_from_musicbrainz(socket, disc_info, disc_id) do
@@ -179,7 +204,7 @@ defmodule CdRobotWeb.ChangerLive do
         |> assign(:view_mode, :albums)
         |> assign(:slots, slots)
         |> assign(:musicbrainz_results, [])
-        |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))
+        |> assign(:musicbrainz_query, "")
         |> assign(:search_query, "")
         |> assign(:search_results, [])
         |> put_flash(
@@ -224,7 +249,7 @@ defmodule CdRobotWeb.ChangerLive do
         |> assign(:view_mode, :albums)
         |> assign(:slots, slots)
         |> assign(:musicbrainz_results, [])
-        |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))
+        |> assign(:musicbrainz_query, "")
         |> assign(:search_query, "")
         |> assign(:search_results, [])
         |> put_flash(
@@ -499,77 +524,53 @@ defmodule CdRobotWeb.ChangerLive do
                 </p>
               </div>
 
-              <.form
-                for={@new_cd_form}
-                phx-change="validate_new_cd"
-                phx-submit="lookup_gnudb"
-                class="space-y-6"
-              >
+              <div class="space-y-6">
                 <div>
                   <label class="block text-sm font-semibold text-slate-300 mb-2">
-                    Artist Name
+                    Search for Album
                   </label>
-                  <input
-                    type="text"
-                    name="new_cd[artist]"
-                    value={@new_cd_form.params["artist"] || ""}
-                    placeholder="e.g., The Beatles"
-                    required
-                    class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    autofocus
-                  />
-                </div>
-
-                <div>
-                  <label class="block text-sm font-semibold text-slate-300 mb-2">
-                    Album Title <span class="text-slate-500 font-normal">(optional - leave blank for all albums)</span>
-                  </label>
-                  <input
-                    type="text"
-                    name="new_cd[album]"
-                    value={@new_cd_form.params["album"] || ""}
-                    placeholder="e.g., Abbey Road"
-                    class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div class="flex gap-3">
-                  <button
-                    type="submit"
-                    disabled={@gnudb_loading}
-                    class="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold transition-colors shadow-lg hover:shadow-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
+                  <div class="relative">
+                    <input
+                      type="text"
+                      phx-change="search_musicbrainz"
+                      name="query"
+                      value={@musicbrainz_query}
+                      placeholder="Search by artist or 'Artist - Album'..."
+                      class="w-full px-4 py-3 pr-12 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      autofocus
+                    />
                     <%= if @gnudb_loading do %>
-                      <svg
-                        class="inline w-5 h-5 mr-2 animate-spin"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          class="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          stroke-width="4"
+                      <div class="absolute right-4 top-1/2 -translate-y-1/2">
+                        <svg
+                          class="w-5 h-5 animate-spin text-blue-400"
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
                         >
-                        </circle>
-                        <path
-                          class="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        >
-                        </path>
-                      </svg>
-                      Looking up on MusicBrainz...
-                    <% else %>
-                      <.icon name="hero-magnifying-glass" class="w-5 h-5 inline mr-2" />
-                      Look Up on MusicBrainz
+                          <circle
+                            class="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            stroke-width="4"
+                          >
+                          </circle>
+                          <path
+                            class="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          >
+                          </path>
+                        </svg>
+                      </div>
                     <% end %>
-                  </button>
+                  </div>
+                  <p class="mt-2 text-xs text-slate-500">
+                    Type artist name for all albums, or "Artist - Album" for specific album
+                  </p>
                 </div>
-              </.form>
+              </div>
 
               <%= if Enum.any?(@musicbrainz_results) do %>
                 <div class="mt-6">
