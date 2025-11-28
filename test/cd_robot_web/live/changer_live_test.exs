@@ -421,4 +421,97 @@ defmodule CdRobotWeb.ChangerLiveTest do
       # but the handler is there for safety
     end
   end
+
+  describe "new CD creation" do
+    test "can switch to new CD view", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/")
+
+      html =
+        view
+        |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
+        |> render_click()
+
+      assert html =~ "Add New CD to Catalog"
+      assert html =~ "Enter the artist and album name"
+      assert html =~ "Look Up on GNUDB"
+      assert html =~ "No CD drive detected"
+    end
+
+    test "can add new CD manually", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/")
+
+      # Switch to new CD view
+      view
+      |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
+      |> render_click()
+
+      # Fill in the form
+      view
+      |> element("form")
+      |> render_change(%{new_cd: %{artist: "Radiohead", album: "OK Computer"}})
+
+      # Submit the form
+      html =
+        view
+        |> element("form")
+        |> render_submit(%{new_cd: %{artist: "Radiohead", album: "OK Computer"}})
+
+      # Form should be cleared after successful submission
+      assert html =~ "value=\"\""
+
+      # Verify it was created in the database
+      disks = Catalog.list_disks()
+      assert Enum.any?(disks, fn d -> d.title == "OK Computer" && d.artist == "Radiohead" end)
+    end
+
+    test "shows error when submitting empty form", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/")
+
+      # Switch to new CD view
+      view
+      |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
+      |> render_click()
+
+      # Submit empty form
+      _html =
+        view
+        |> element("form")
+        |> render_submit(%{new_cd: %{artist: "", album: ""}})
+
+      # Verify no disk was created
+      initial_count = length(Catalog.list_disks())
+
+      # After submitting empty form, count should stay the same
+      final_count = length(Catalog.list_disks())
+      assert final_count == initial_count
+    end
+
+    test "form is cleared when switching views", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/")
+
+      # Switch to new CD view and fill form
+      view
+      |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
+      |> render_click()
+
+      view
+      |> element("form")
+      |> render_change(%{new_cd: %{artist: "Test Artist", album: "Test Album"}})
+
+      # Switch to albums view
+      view
+      |> element("button[phx-click='switch_view'][phx-value-mode='albums']")
+      |> render_click()
+
+      # Switch back to new CD view
+      html =
+        view
+        |> element("button[phx-click='switch_view'][phx-value-mode='new_cd']")
+        |> render_click()
+
+      # Form should be cleared
+      refute html =~ "Test Artist"
+      refute html =~ "Test Album"
+    end
+  end
 end

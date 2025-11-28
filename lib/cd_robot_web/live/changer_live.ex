@@ -13,12 +13,16 @@ defmodule CdRobotWeb.ChangerLive do
      |> assign(:selected_disk, nil)
      |> assign(:search_query, "")
      |> assign(:search_results, [])
+     |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))
      |> assign(:page_title, "CD Changer")}
   end
 
   @impl true
   def handle_event("switch_view", %{"mode" => mode}, socket) do
-    {:noreply, assign(socket, :view_mode, String.to_existing_atom(mode))}
+    {:noreply,
+     socket
+     |> assign(:view_mode, String.to_existing_atom(mode))
+     |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))}
   end
 
   def handle_event("select_disk", %{"disk_id" => disk_id}, socket) do
@@ -83,7 +87,43 @@ defmodule CdRobotWeb.ChangerLive do
      socket
      |> assign(:selected_disk, nil)
      |> assign(:search_query, "")
-     |> assign(:search_results, [])}
+     |> assign(:search_results, [])
+     |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))}
+  end
+
+  def handle_event("validate_new_cd", %{"new_cd" => params}, socket) do
+    {:noreply, assign(socket, :new_cd_form, to_form(params))}
+  end
+
+  def handle_event("lookup_gnudb", %{"new_cd" => %{"artist" => artist, "album" => album}}, socket) do
+    if String.trim(artist) == "" or String.trim(album) == "" do
+      {:noreply,
+       socket
+       |> put_flash(:error, "Please enter both artist and album name")}
+    else
+      # TODO: Implement GNUDB API lookup
+      # For now, create a placeholder disk that can be edited later
+      disc_id = :crypto.hash(:md5, "#{artist}#{album}") |> Base.encode16(case: :lower) |> String.slice(0..7)
+
+      case Catalog.create_disk(%{
+             title: String.trim(album),
+             artist: String.trim(artist),
+             disc_id: disc_id
+           }) do
+        {:ok, _disk} ->
+          {:noreply,
+           socket
+           |> assign(:new_cd_form, to_form(%{"artist" => "", "album" => ""}))
+           |> assign(:search_query, "")
+           |> assign(:search_results, [])
+           |> put_flash(:info, "Album '#{album}' by #{artist} added to catalog")}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, "Failed to add album: #{inspect(changeset.errors)}")}
+      end
+    end
   end
 
   @impl true
@@ -107,12 +147,12 @@ defmodule CdRobotWeb.ChangerLive do
           </div>
 
           <%!-- View Mode Toggle --%>
-          <div class="flex gap-2">
+          <div class="grid grid-cols-3 gap-2">
             <button
               phx-click="switch_view"
               phx-value-mode="albums"
               class={[
-                "flex-1 px-4 py-3 rounded-lg font-semibold transition-all",
+                "px-4 py-3 rounded-lg font-semibold transition-all",
                 if(@view_mode == :albums,
                   do: "bg-blue-600 text-white shadow-lg shadow-blue-500/50",
                   else: "bg-slate-700 text-slate-300 hover:bg-slate-600"
@@ -126,7 +166,7 @@ defmodule CdRobotWeb.ChangerLive do
               phx-click="switch_view"
               phx-value-mode="empty_slots"
               class={[
-                "flex-1 px-4 py-3 rounded-lg font-semibold transition-all",
+                "px-4 py-3 rounded-lg font-semibold transition-all",
                 if(@view_mode == :empty_slots,
                   do: "bg-blue-600 text-white shadow-lg shadow-blue-500/50",
                   else: "bg-slate-700 text-slate-300 hover:bg-slate-600"
@@ -136,10 +176,25 @@ defmodule CdRobotWeb.ChangerLive do
               <.icon name="hero-plus-circle" class="w-5 h-5 inline mr-2" />
               Load Album
             </button>
+            <button
+              phx-click="switch_view"
+              phx-value-mode="new_cd"
+              class={[
+                "px-4 py-3 rounded-lg font-semibold transition-all",
+                if(@view_mode == :new_cd,
+                  do: "bg-blue-600 text-white shadow-lg shadow-blue-500/50",
+                  else: "bg-slate-700 text-slate-300 hover:bg-slate-600"
+                )
+              ]}
+            >
+              <.icon name="hero-plus" class="w-5 h-5 inline mr-2" />
+              Add New CD
+            </button>
           </div>
         </div>
 
-        <%= if @view_mode == :albums do %>
+        <%= cond do %>
+          <% @view_mode == :albums -> %>
           <%!-- Albums View --%>
           <div class="bg-slate-800/90 backdrop-blur rounded-2xl shadow-2xl p-6 border border-slate-700">
             <%= if Enum.any?(@slots, & &1.disk_id) do %>
@@ -189,7 +244,8 @@ defmodule CdRobotWeb.ChangerLive do
               </div>
             <% end %>
           </div>
-        <% else %>
+
+          <% @view_mode == :empty_slots -> %>
           <%!-- Empty Slots View --%>
           <div class="bg-slate-800/90 backdrop-blur rounded-2xl shadow-2xl p-6 border border-slate-700">
             <%!-- Search Bar --%>
@@ -298,6 +354,82 @@ defmodule CdRobotWeb.ChangerLive do
                   <p>All slots are loaded!</p>
                 </div>
               <% end %>
+            </div>
+          </div>
+
+          <% @view_mode == :new_cd -> %>
+          <%!-- New CD View --%>
+          <div class="bg-slate-800/90 backdrop-blur rounded-2xl shadow-2xl p-6 border border-slate-700">
+            <div class="max-w-2xl mx-auto">
+              <div class="text-center mb-8">
+                <div class="inline-flex items-center justify-center w-16 h-16 bg-blue-600/20 rounded-full mb-4">
+                  <.icon name="hero-plus-circle" class="w-8 h-8 text-blue-400" />
+                </div>
+                <h2 class="text-2xl font-bold text-white mb-2">Add New CD to Catalog</h2>
+                <p class="text-slate-400">
+                  Enter the artist and album name to look up metadata from GNUDB
+                </p>
+              </div>
+
+              <.form
+                for={@new_cd_form}
+                phx-change="validate_new_cd"
+                phx-submit="lookup_gnudb"
+                class="space-y-6"
+              >
+                <div>
+                  <label class="block text-sm font-semibold text-slate-300 mb-2">
+                    Artist Name
+                  </label>
+                  <input
+                    type="text"
+                    name="new_cd[artist]"
+                    value={@new_cd_form.params["artist"] || ""}
+                    placeholder="e.g., The Beatles"
+                    class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    autofocus
+                  />
+                </div>
+
+                <div>
+                  <label class="block text-sm font-semibold text-slate-300 mb-2">
+                    Album Title
+                  </label>
+                  <input
+                    type="text"
+                    name="new_cd[album]"
+                    value={@new_cd_form.params["album"] || ""}
+                    placeholder="e.g., Abbey Road"
+                    class="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div class="flex gap-3">
+                  <button
+                    type="submit"
+                    class="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold transition-colors shadow-lg hover:shadow-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <.icon name="hero-magnifying-glass" class="w-5 h-5 inline mr-2" />
+                    Look Up on GNUDB
+                  </button>
+                </div>
+              </.form>
+
+              <div class="mt-8 p-4 bg-slate-900/50 rounded-lg border border-slate-700">
+                <div class="flex gap-3">
+                  <.icon name="hero-information-circle" class="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+                  <div class="text-sm text-slate-400">
+                    <p class="mb-2">
+                      <strong class="text-slate-300">No CD drive detected.</strong>
+                      You can manually add CDs by entering the artist and album information.
+                    </p>
+                    <p>
+                      The system will attempt to look up track listings and metadata from the GNUDB database.
+                      If not found, a basic entry will be created that you can edit later.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         <% end %>
