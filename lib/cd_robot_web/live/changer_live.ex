@@ -1,8 +1,6 @@
 defmodule CdRobotWeb.ChangerLive do
   use CdRobotWeb, :live_view
-  alias CdRobot.{Changer, Catalog}
-  alias CdRobot.MusicBrainzClient
-  alias CdRobot.MusicBrainz
+  alias CdRobot.{Changer, Catalog, MusicBrainz}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -132,7 +130,7 @@ defmodule CdRobotWeb.ChangerLive do
        |> put_flash(:error, "Please enter an artist name")}
     else
       # Asynchronously look up the album on MusicBrainz via GenServer
-      MusicBrainzClient.lookup_album(self(), artist, album)
+      MusicBrainz.lookup_album(self(), artist, album)
 
       {:noreply, assign(socket, :gnudb_loading, true)}
     end
