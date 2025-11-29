@@ -76,6 +76,7 @@
               pkgs.fd
               pkgs.curl
               pkgs.docker-compose
+              pkgs.docker-buildx
               pkgs.gnupg
               pkgs.pinentry-curses
               pkgs.watchman
@@ -98,6 +99,10 @@
             export DATABASE_URL="ecto://mjc@localhost:5432/reencodarr_dev"
             export SECRET_KEY_BASE="WEWsPGIpK/OgJA2ZcwzsgZxWKSAp35IsqWPYsvSUmm5awBUGpvsVOcG2kkDteXR1"
             export COMPOSE_BAKE=true
+
+            # Setup Docker buildx plugin
+            mkdir -p ~/.docker/cli-plugins
+            ln -sf ${pkgs.docker-buildx}/bin/docker-buildx ~/.docker/cli-plugins/docker-buildx
 
             # GPG Configuration
             export GPG_TTY=$(tty)

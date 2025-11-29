@@ -1,0 +1,47 @@
+services:
+  # Development mode - hot reloading, mounted volumes
+  web-dev:
+    init: true
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "4000:4000"
+    volumes:
+      - .:/app
+      - deps:/app/deps
+      - build:/app/_build
+    environment:
+      - MIX_ENV=dev
+      - PHX_HOST=localhost
+      - PHX_SERVER=true
+      - SECRET_KEY_BASE=dev_secret_key_base_at_least_64_bytes_long_for_development_only
+    command: sh -c "mix deps.get && mix ecto.setup && mix phx.server"
+    stdin_open: true
+    tty: true
+    profiles:
+      - dev
+
+  # Production mode - compiled release
+  web-prod:
+    init: true
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4002:4002"
+    volumes:
+      - prod-data:/app/data
+    environment:
+      - PHX_HOST=localhost
+      - PORT=4002
+      - PHX_SERVER=true
+      - SECRET_KEY_BASE=61dBbed601UQVogsPNMzp/J1D4AqpcHrdo9v1mFOBR1WbC/shEn2QWGblQ2BHSUU
+      - DATABASE_PATH=/app/data/cd_robot.db
+    profiles:
+      - prod
+
+volumes:
+  deps:
+  build:
+  prod-data:

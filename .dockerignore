@@ -1,0 +1,8 @@
+# Keep development artifacts out of docker
+_build/
+deps/
+*.ez
+
+# Keep sensitive data out
+.env
+.env.*.local

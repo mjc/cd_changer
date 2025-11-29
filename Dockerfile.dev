@@ -1,0 +1,26 @@
+FROM hexpm/elixir:1.19.4-erlang-28.1.1-debian-bookworm-20251117-slim
+
+# install build dependencies
+RUN apt-get update -y && apt-get install -y build-essential git inotify-tools \
+    && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+# prepare build dir
+WORKDIR /app
+
+# install hex + rebar
+RUN mix local.hex --force && \
+    mix local.rebar --force
+
+# Set the locale
+RUN apt-get update && apt-get install -y locales && \
+    sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen && \
+    apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US:en
+ENV LC_ALL en_US.UTF-8
+
+# set dev ENV
+ENV MIX_ENV="dev"
+
+CMD ["mix", "phx.server"]
