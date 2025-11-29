@@ -16,6 +16,26 @@ defmodule CdRobotWeb.LoadLive do
   end
 
   @impl true
+  def handle_params(%{"disk_id" => disk_id}, _url, socket) do
+    # Auto-load the specified disk into search results
+    try do
+      disk = Catalog.get_disk!(disk_id)
+
+      {:noreply,
+       socket
+       |> assign(:search_query, disk.title)
+       |> assign(:search_results, [disk])}
+    rescue
+      Ecto.NoResultsError ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_params(_params, _url, socket) do
+    {:noreply, socket}
+  end
+
+  @impl true
   def handle_event("search_disks", %{"search" => query}, socket) do
     results =
       if String.length(query) >= 2 do

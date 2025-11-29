@@ -128,7 +128,7 @@ defmodule CdRobotWeb.AddLive do
     tracks_attrs = disc_info[:tracks] || []
 
     case Catalog.create_disk_with_tracks(disk_attrs, tracks_attrs) do
-      {:ok, _disk} ->
+      {:ok, disk} ->
         socket
         |> assign(:musicbrainz_results, [])
         |> assign(:musicbrainz_query, "")
@@ -136,7 +136,7 @@ defmodule CdRobotWeb.AddLive do
           :info,
           "Album '#{disk_attrs.title}' by #{disk_attrs.artist} added. Select a slot to load it."
         )
-        |> push_navigate(to: ~p"/load")
+        |> push_navigate(to: ~p"/load?disk_id=#{disk.id}")
 
       {:error, changeset} ->
         error_message =
@@ -168,7 +168,7 @@ defmodule CdRobotWeb.AddLive do
            artist: artist,
            disc_id: disc_id
          }) do
-      {:ok, _disk} ->
+      {:ok, disk} ->
         socket
         |> assign(:musicbrainz_results, [])
         |> assign(:musicbrainz_query, "")
@@ -176,7 +176,7 @@ defmodule CdRobotWeb.AddLive do
           :info,
           "Album '#{album}' by #{artist} added. Select a slot to load it."
         )
-        |> push_navigate(to: ~p"/load")
+        |> push_navigate(to: ~p"/load?disk_id=#{disk.id}")
 
       {:error, changeset} ->
         error_message =

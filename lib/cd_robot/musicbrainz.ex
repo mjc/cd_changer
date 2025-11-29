@@ -70,16 +70,20 @@ defmodule CdRobot.MusicBrainz do
   def search_album(artist, album) do
     query =
       if album == "" do
-        "artist:#{artist}"
+        # Search for artist with explicit artist type to get better matches
+        "artist:\"#{artist}\""
       else
-        "artist:#{artist} AND release:#{album}"
+        # Search for both artist and release name
+        "artist:\"#{artist}\" AND release:\"#{album}\""
       end
 
-    case SonEx.MusicBrainz.search_releases(query, limit: 25) do
+    case SonEx.MusicBrainz.search_releases(query, limit: 50) do
       {:ok, %{"releases" => releases}} when is_list(releases) and length(releases) > 0 ->
         results =
           releases
           |> Enum.map(&parse_release/1)
+          # Sort by year (newest first), treating nil as 0
+          |> Enum.sort_by(&parse_year/1, :desc)
           |> Enum.uniq_by(fn release ->
             # Deduplicate by artist + album name (case-insensitive)
             {String.downcase(release.artist), String.downcase(release.album)}
@@ -117,6 +121,10 @@ defmodule CdRobot.MusicBrainz do
       year: year
     }
   end
+
+  defp parse_year(%{year: nil}), do: 0
+  defp parse_year(%{year: ""}), do: 0
+  defp parse_year(%{year: year}), do: String.to_integer(year)
 
   @doc """
   Get cover art URL from Cover Art Archive.
